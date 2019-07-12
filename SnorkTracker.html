@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+   <meta name="viewport" content="initial-scale=1.0, user-scalable=no" />
+   <style type="text/css">
+      html {
+         height: 100%
+      }
+
+      body {
+         height: 100%;
+         margin: 0;
+         padding: 0
+      }
+
+      #map_canvas {
+         height: 100%
+      }
+
+      #info {
+         position: absolute;
+         width: 20%;
+         height: 100%;
+         bottom: 0px;
+         right: 0px;
+         top: 0px;
+         background-color: white;
+         border-left: 1px #666 solid;
+         font-family: Helvetica;
+      }
+
+         #info div {
+            padding: 0px;
+            padding-left: 10px;
+            margin: 0px;
+         }
+
+            #info div h1 {
+               margin-top: 10px;
+               font-size: 16px;
+            }
+
+            #info div p {
+               font-size: 14px;
+               color: #333;
+            }
+   </style>
+
+   <!-- <script src="Config.js"></script> -->
+   <script src="ConfigOverride.js"></script>
+
+   <script src="https://code.jquery.com/jquery-1.10.2.js"></script>
+
+   <script>
+    var Map1 = null;
+    CenterLat=45.0;
+    CenterLon=9.0;
+    Items={};
+    NumItems = 0;
+    Selected=null
+    HitSelected=null;
+
+    function loadScript() {
+      var script   = document.createElement('script');
+      script.async = true;
+      script.defer = true;
+      script.src   = 'https://maps.googleapis.com/maps/api/js?key=' + MY_GOOGLE_API_KEY + '&callback=initMap'; 
+      document.body.appendChild(script);
+    }
+
+    function initMap() {
+
+      Map1 = new google.maps.Map(document.getElementById('map'), {
+         zoom: 3,
+         center: { lat: 45.0, lng: 9.0 },
+         mapTypeId: 'terrain'
+      });
+      document.getElementById('resetButton').style.visibility = 'hidden';
+      Interval = window.setInterval(function () {
+         fetchData();
+      }, 1000);
+    }
+
+    function getParameter(theParameter) {
+        var params = window.location.search.substr(1).split('&');
+
+        for (var i = 0; i < params.length; i++) {
+           var p=params[i].split('=');
+           if (p[0] == theParameter) {
+               return decodeURIComponent(p[1]);
+           }
+        }
+        return ""; /* false; */
+    }
+
+    function getIconForItem(item) {
+        var r = 255, g = 255, b = 0;
+        var selected = (Selected == item.id);
+
+        return {
+            strokeWeight: (selected ? 2 : 1),
+            path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+            scale: 5,
+            fillColor: 'rgb('+r+','+g+','+b+')',
+            fillOpacity: 0.9,
+            rotation: item.track
+        };
+    }
+
+    function dblselectItem() {
+        if (!Items[this.itemid]) return;
+        document.getElementById('resetButton').style.visibility = 'visible';
+        HitSelected = this.itemid;
+        fetchData()
+    }
+
+    function resetSelection() {
+        HitSelected = null;
+        document.getElementById('resetButton').style.visibility = 'hidden';
+        fetchData()
+    }
+
+    function selectItem() {
+        if (!Items[this.itemid]) return;
+        var old = Selected;
+        Selected = this.itemid;
+        if (Items[old]) {
+            Items[old].marker.setIcon(getIconForItem(Items[old]));
+        }
+        Items[Selected].marker.setIcon(getIconForItem(Items[Selected]));
+        refreshSelectedInfo();
+    }
+
+    function refreshGeneralInfo() {
+        var i = document.getElementById('geninfo');
+
+        i.innerHTML = NumItems + ' Element(e) auf der Karte.';
+    }
+
+    function refreshSelectedInfo() {
+        var i = document.getElementById('selinfo');
+        var p = Items[Selected];
+
+        if (!p) return;
+
+        var html;
+
+        html += '<table border="1">';
+        html += '<tr><td>Name</td><td>'     + p.name +'</td></tr>'; 
+        html += '<tr><td>Zeit</td><td>'     + p.id   + '</td></tr>';
+        html += '<tr><td>Position</td><td>' + p.lat  + ', ' + p.lng + '</td></tr>';
+        html += '<tr><td>Höhe</td><td>'     + p.alt  + ' m</td></tr>';
+        html += '<tr><td>Speed</td><td>'    + p.kmph + ' kmph</td></tr>';
+        html += '</table>';
+        i.innerHTML = html;
+    }
+
+    function fetchData() {
+      var currId = getParameter('id');
+
+       if (HitSelected) currId = HitSelected;
+
+      try {
+         $.getJSON(MY_MQTT_SERVER + '/getPlainValue/javascript.0.SnorkTracker.Molli.Gps',
+           function (GpsData) {
+            var data = JSON.parse(GpsData);
+
+            var stillhere = {}
+            for (var j = 0; j < data.length; j++) {
+               var item = data[j];
+               var marker = null;
+               stillhere[item.id] = true;
+
+               marker = new google.maps.Marker({
+                  position: new google.maps.LatLng(item.lat, item.lng),
+                  map: Map1,
+                  icon: getIconForItem(item)
+               });
+               item.marker = marker;
+               marker.itemid = item.id;
+               Items[item.id] = item;
+               /* Trap clicks for this marker. */
+               google.maps.event.addListener(marker, 'click', selectItem);
+               google.maps.event.addListener(marker, "dblclick", dblselectItem);
+               marker.setTitle(item.name)
+            }
+            NumItems = data.length;
+            refreshGeneralInfo();
+
+            /* Remove idle items. */
+            for (var p in Items) {
+               if (!stillhere[p]) {
+                  Items[p].marker.setMap(null);
+                  delete Items[p];
+               }
+            }
+
+            if (Interval) {
+               window.clearInterval(Interval);
+            }
+            Interval = window.setInterval(function () {
+               fetchData();
+            }, 60000);
+           });
+      } catch (err) {
+         document.getElementById("demo").innerHTML = err.message;
+       }
+    }
+
+      window.onload = loadScript;
+
+   </script>
+</head>
+<body">
+   <div id="map" style="width:80%; height:100%"></div>
+   <div id="info">
+      <div>
+         <h1>Positionen</h1>
+         <p id="geninfo"></p>
+         <p id="selinfo">Klicken Sie auf ein Element für mehr informationen.</p>
+         <button id="resetButton" onclick="resetSelection()">Reset</button>
+      </div>
+   </div>
+</body>
+</html>
